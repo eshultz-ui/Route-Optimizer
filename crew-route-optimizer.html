@@ -104,6 +104,7 @@
   .seg button.on[data-obj], .seg button.on[data-bal]{color:var(--hi)}
 
   .hint{font-size:11px; color:var(--muted-2); margin-top:8px; line-height:1.5}
+  .preset-lbl{font-family:"Archivo",sans-serif; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); margin:2px 0 7px}
 
   label.chk{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); cursor:pointer; margin-top:4px}
   label.chk input{accent-color:var(--hi); width:15px; height:15px; cursor:pointer}
@@ -369,31 +370,6 @@
         <div class="hint"><b>Even workload</b> balances each crew's drive time so they finish together. <b>Equal stops</b> gives every crew about the same number of jobs. <b>Fewest miles</b> minimizes total travel and may leave a crew unused. You can enter any number of crews (up to the number of stops).</div>
       </div>
 
-      <!-- Distance model -->
-      <div class="sec">
-        <h2>Distance Model</h2>
-        <div class="row">
-          <label class="fld grow"><span>Road factor (× straight-line)</span><input id="roadFactor" class="inp mono" type="number" step="0.05" min="1" value="1.30" /></label>
-          <label class="fld grow"><span>Average speed (mph)</span><input id="avgSpeed" class="inp mono" type="number" step="1" min="1" value="35" /></label>
-        </div>
-        <div class="hint">Distances are geometric — straight-line (great-circle) distance × the road factor, with time from your average speed. Fully offline, no routing server, no stop limit. A road factor around 1.3 approximates real street mileage; raise it for dense/hilly areas. Time-of-day traffic below adjusts the effective speed.</div>
-      </div>
-
-      <!-- Schedule & traffic -->
-      <div class="sec">
-        <h2>Schedule &amp; Traffic</h2>
-        <div class="row">
-          <label class="fld grow"><span>Depart to sites</span><input id="departTime" class="inp mono" type="time" value="08:00" /></label>
-          <label class="fld grow"><span>Return to base</span><input id="returnTime" class="inp mono" type="time" value="16:30" /></label>
-        </div>
-        <label class="chk"><input type="checkbox" id="manualTraffic" /><span>Set traffic multipliers manually</span></label>
-        <div id="manualRow" class="row" style="display:none; margin-top:8px">
-          <label class="fld grow"><span>Outbound ×</span><input id="depFactor" class="inp mono" type="number" step="0.05" min="0.5" value="1.45" /></label>
-          <label class="fld grow"><span>Return ×</span><input id="retFactor" class="inp mono" type="number" step="0.05" min="0.5" value="1.50" /></label>
-        </div>
-        <div id="trafficNote" class="hint"></div>
-      </div>
-
       <!-- Costs -->
       <div class="sec">
         <h2>Cost Inputs</h2>
@@ -415,10 +391,17 @@
           <b>Running in a preview pane.</b> Optimization works here, but typing an <b>address</b> needs a real browser tab. Coordinates and map clicks work anywhere.
         </div>
         <button id="run" class="btn amber full" style="padding:12px; font-size:14px; margin-bottom:9px">Optimize routes</button>
-        <button id="compare" class="btn full" style="margin-bottom:9px">Compare crew counts →</button>
+        <button id="compare" class="btn full" style="margin-bottom:11px">Compare crew counts →</button>
+
+        <div class="preset-lbl">Load a preset</div>
+        <div class="row" style="margin-bottom:7px">
+          <button id="loadOld" class="btn ghost grow sm">Old branch · Milpitas (326)</button>
+          <button id="loadNew" class="btn ghost grow sm">New branch · Burlingame (179)</button>
+        </div>
+        <button id="example" class="btn ghost full sm" style="margin-bottom:11px">All sites · both branches (505)</button>
+
         <div class="row">
           <button id="conntest" class="btn ghost grow sm">Test address</button>
-          <button id="example" class="btn ghost grow sm">Load Bay Area example</button>
           <button id="clear" class="btn ghost grow sm">Clear all</button>
         </div>
       </div>
@@ -508,32 +491,6 @@ function fmtMi(m){ return m.toFixed(1); }
 function fmtHrs(h){ const tot=Math.round(h*60); const hh=Math.floor(tot/60), mm=tot%60; return hh? `${hh}h ${mm}m` : `${mm}m`; }
 function money(v){ return '$'+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
-/* ---------------- Time-of-day traffic ---------------- */
-// Free-flow times scaled by an urban Bay-Area congestion curve.
-// Returns a multiplier on free-flow drive time for a given clock hour (0..24).
-function trafficFactor(h){
-  const pts=[[0,0.90],[5,1.00],[6.5,1.20],[8,1.50],[9.5,1.20],[11,1.10],[14,1.12],
-             [16,1.30],[17.5,1.55],[19,1.20],[21,1.00],[24,0.92]];
-  if(h<=pts[0][0]) return pts[0][1];
-  for(let i=1;i<pts.length;i++){
-    if(h<=pts[i][0]){ const [x0,y0]=pts[i-1],[x1,y1]=pts[i]; const t=(h-x0)/(x1-x0); return y0+(y1-y0)*t; }
-  }
-  return pts[pts.length-1][1];
-}
-function parseHour(hhmm){ const m=(hhmm||'').match(/^(\d{1,2}):(\d{2})$/); return m? (+m[1])+(+m[2])/60 : NaN; }
-function clock12(h){
-  if(!isFinite(h)) return '—';
-  let hh=Math.floor(h)%24, mm=Math.round((h-Math.floor(h))*60);
-  if(mm===60){mm=0;hh=(hh+1)%24;}
-  const ap=hh<12?'AM':'PM'; let h12=hh%12; if(h12===0)h12=12;
-  return `${h12}:${String(mm).padStart(2,'0')} ${ap}`;
-}
-function trafficFactors(){
-  if($('manualTraffic').checked){
-    return { dep:Math.max(0.3,+$('depFactor').value||1), ret:Math.max(0.3,+$('retFactor').value||1), manual:true };
-  }
-  return { dep:trafficFactor(parseHour($('departTime').value)), ret:trafficFactor(parseHour($('returnTime').value)), manual:false };
-}
 
 /* ---------------- Geocode (Nominatim) ---------------- */
 // Restricted to the San Francisco Bay Area so ambiguous addresses can't
@@ -631,13 +588,14 @@ function havMeters(a,b){
   const h=Math.sin(dLa/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLn/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
-// Build distance(m)+duration(s) matrices geometrically: great-circle × road factor,
-// time from average speed. No network, no stop limit. Async only to keep callers simple.
+// Built-in distance assumptions (no user input needed):
+// straight-line distance × ROAD_FACTOR ≈ real street mileage; AVG_MPH sets drive time.
+const ROAD_FACTOR=1.3, AVG_MPH=35;
+// Build distance(m)+duration(s) matrices geometrically. No network, no stop limit.
+// Async only to keep callers simple.
 async function getMatrix(points, onMsg){
   const N=points.length;
-  const factor=Math.max(1, +$('roadFactor').value||1.3);
-  const mph=Math.max(1, +$('avgSpeed').value||35);
-  const speed=mph*0.44704; // m/s (free-flow; traffic factors scale this later)
+  const factor=ROAD_FACTOR, mph=AVG_MPH, speed=mph*0.44704; // m/s
   onMsg && onMsg(N>200?'Building distance matrix…':'Measuring distances…');
   const dist=new Array(N), dur=new Array(N);
   for(let i=0;i<N;i++){ dist[i]=new Float64Array(N); dur[i]=new Float64Array(N); }
@@ -958,12 +916,9 @@ async function optimize(){
   const n=state.jobs.length;
   // matrices indexed 0..n (0 = base)
   const dist=mat.dist, dur=mat.dur;
-  const tf=trafficFactors(); const depF=tf.dep, retF=tf.ret;
-  // Time objective: scale durations by traffic. Any leg arriving back at base
-  // (column 0) uses the RETURN factor; every other leg uses the OUTBOUND factor.
-  // Distance objective is unaffected by time of day.
+  const depF=1, retF=1; // no time-of-day traffic
   const C = objIsTime
-    ? dur.map((row)=>Array.from(row,(v,j)=> v*(j===0?retF:depF)))
+    ? dur.map((row)=>Array.from(row))
     : dist.map(row=>Array.from(row));
   const coords=[ {lat:state.base.lat,lng:state.base.lng}, ...state.jobs.map(j=>({lat:j.lat,lng:j.lng})) ];
 
@@ -975,8 +930,7 @@ async function optimize(){
   // build report (shared with crew-count comparison)
   const rttBuf = Math.max(0, +$('rttbuf').value||0)/60; // hours added per crew, there-and-back
   const plan = buildPlan(routesIdx, dist, dur, {depF, retF, rttBuf, rate, gasPrice, mpg, people});
-  state.result={ ...plan, depF, retF, manual:tf.manual, departTime:$('departTime').value, returnTime:$('returnTime').value,
-                 matMode:mat.mode, matFactor:mat.factor, matMph:mat.mph };
+  state.result={ ...plan, matMode:mat.mode, matFactor:mat.factor, matMph:mat.mph };
 
   drawRoutes();
   drawMarkers();
@@ -994,7 +948,7 @@ async function compareCrews(){
   const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
   const rttBuf=Math.max(0,+$('rttbuf').value||0)/60;
   const people=Math.max(1, parseInt($('people').value)||1);
-  const tf=trafficFactors(); const depF=tf.dep, retF=tf.ret;
+  const depF=1, retF=1;
 
   $('compare').disabled=true;
   const mat=await getMatrix([state.base, ...state.jobs], m=>toast(m));
@@ -1002,7 +956,7 @@ async function compareCrews(){
   const n=state.jobs.length, chosenK=Math.max(1,parseInt($('crews').value)||1), maxC=Math.min(n, Math.max(12, chosenK), 40);
   const dist=mat.dist, dur=mat.dur;
   const coords=[ {lat:state.base.lat,lng:state.base.lng}, ...state.jobs.map(j=>({lat:j.lat,lng:j.lng})) ];
-  const C = objIsTime ? dur.map(row=>Array.from(row,(v,j)=> v*(j===0?retF:depF))) : dist.map(r=>Array.from(r));
+  const C = objIsTime ? dur.map(row=>Array.from(row)) : dist.map(r=>Array.from(r));
 
   const rows=[];
   for(let c=1;c<=maxC;c++){
@@ -1069,15 +1023,11 @@ function renderResult(){
   const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
   const host=$('tickets'); host.style.display='block'; $('placeholder').style.display='none';
   host.innerHTML='';
-  // traffic + data-source context summary
+  // data-source context summary
   const tline=document.createElement('div'); tline.className='trafsum';
-  const trafTxt = R.manual
-    ? `Traffic (manual): outbound <b>×${R.depF.toFixed(2)}</b> · return <b>×${R.retF.toFixed(2)}</b>`
-    : `Traffic at ${clock12(parseHour(R.departTime))} out / ${clock12(parseHour(R.returnTime))} back: outbound <b>×${R.depF.toFixed(2)}</b> · return <b>×${R.retF.toFixed(2)}</b>`;
   const ppl = R.people||1;
-  const srcTxt = `<br><span class="est">Geometric distances</span> · straight-line ×${(R.matFactor||1).toFixed(2)}, ${Math.round(R.matMph||0)} mph`
+  tline.innerHTML = `<span class="est">Estimated distances</span> · straight-line ×${(R.matFactor||1).toFixed(2)} for road miles, ~${Math.round(R.matMph||0)} mph`
     + (ppl>1?` · ${ppl} people/crew`:'');
-  tline.innerHTML = trafTxt + srcTxt;
   host.appendChild(tline);
   const collapse = R.routes.length>0 && R.routes.some(rt=>rt.seq.length>14);
   R.routes.forEach((rt,ri)=>{
@@ -1185,22 +1135,6 @@ document.querySelectorAll('#balSeg button').forEach(b=>b.onclick=()=>{
   b.classList.add('on');
 });
 
-// ---- Schedule & traffic UI ----
-function updateTrafficNote(){
-  const manual=$('manualTraffic').checked;
-  $('manualRow').style.display = manual ? 'flex' : 'none';
-  const tf=trafficFactors();
-  const stale = state.result ? ' Re-run Optimize to apply.' : '';
-  if(manual){
-    $('trafficNote').innerHTML = `Scaling free-flow drive times by your multipliers: outbound <b>×${tf.dep.toFixed(2)}</b>, return <b>×${tf.ret.toFixed(2)}</b>. Heavier traffic raises drive time, labor, and fuel.${stale}`;
-  } else {
-    const dh=parseHour($('departTime').value), rh=parseHour($('returnTime').value);
-    $('trafficNote').innerHTML = `Estimated Bay-Area traffic: leaving ${clock12(dh)} → outbound <b>×${tf.dep.toFixed(2)}</b>, returning ${clock12(rh)} → return <b>×${tf.ret.toFixed(2)}</b>. These scale drive time, labor, and fuel (and the time-based optimization).${stale}`;
-  }
-}
-['departTime','returnTime','depFactor','retFactor'].forEach(id=>$(id).addEventListener('input',updateTrafficNote));
-$('manualTraffic').addEventListener('change',updateTrafficNote);
-updateTrafficNote();
 $('run').onclick=optimize;
 $('compare').onclick=compareCrews;
 $('compareClose').onclick=()=>$('compareModal').classList.remove('show');
@@ -1220,15 +1154,19 @@ function recost(){ // recompute cost + round-trip buffer + headcount without re-
   R.labor=R.totHr*rate*people; R.gas=(R.totFuelMi/mpg)*gasPrice; R.total=R.labor+R.gas; renderResult();
 }
 
-$('example').onclick=()=>{
+const OLD_BRANCH_JOBS=[[37.293194,-121.966476,"Hamilton Plaza (Campbell)"],[37.427385,-122.098044,"Intuit MTV 22 (Mountain View)"],[37.428764,-122.09764,"Intuit MTV 20 (Mountain View)"],[37.402064,-122.056545,"515 North Whisman (Mountain View)"],[37.404508,-122.056087,"313 Fairchild - now CBRE (Mountain View)"],[37.404092,-122.05514,"323 Fairchild - now CBRE (Mountain View)"],[37.39846,-122.057561,"CBRE - QD6 - 379 Whisman (Mountain View)"],[37.399819,-122.058068,"CBRE - QD5 - 399 Whisman (Mountain View)"],[37.398667,-122.052754,"CBRE - QD3 - 468 Ellis (Mountain View)"],[37.399524,-122.052994,"CBRE- QD1 - 464 Ellis (Mountain View)"],[37.39957,-122.057111,"CBRE - QD4 - 389 Whisman (Mountain View)"],[37.398612,-122.058513,"CBRE - QD7 - 369 Whisman (Mountain View)"],[37.399845,-122.05413,"CBRE -QD2 - 466 Ellis (Mountain View)"],[37.431897,-122.097858,"2551 Casey MTV 17 (Mountain View)"],[37.408622,-122.034225,"Moffett Towers II (Sunnyvale)"],[37.403022,-122.031064,"Tech Corners (Sunnyvale)"],[37.394013,-122.037232,"Google - 645 North Mary - not part of main portfolio (Sunnyv"],[37.244349,-121.94917,"15400 National (Los Gatos)"],[37.287289,-121.945791,"Campbell Memorial Chapel - Darling Fisher - all on one job"],[37.323596,-122.039847,"Whole Foods Cupertino"],[37.314762,-122.051006,"Westmont Park Villas (Cupertino)"],[37.321088,-122.02674,"Chateau Cupertino"],[37.334988,-122.042903,"Valley Church of Cupertino"],[37.47448,-121.92877,"Transcontinental/Bay Area Prod Service (Fremont)"],[37.566132,-122.004953,"Southwyke Terrace (Fremont)"],[37.474126,-121.934601,"Evolve, 47300 Bayside Parkway, Fremont"],[37.467279,-121.927351,"Tesla - NA US CA Fremont 48370 Kato Road - Fremont"],[37.487715,-121.938435,"Thermo Fisher Fremont"],[37.473783,-121.9362,"47211-47241 Bayside Parkway  -Bizlink (Fremont)"],[37.473931,-121.939775,"3400 Gateway (Fremont)"],[37.666714,-122.084795,"Grand Terrace HOA (Hayward)"],[37.639307,-122.126281,"Hayward Industrial - 23751-23787 Eichler, Hayward"],[37.651182,-122.143322,"Wall to Wall (Hayward)"],[37.650314,-122.091733,"Jackson Flats - 24900 Santa Clara St, Hayward"],[37.664723,-122.115221,"Junction Flats - 816 W A Street, Hayward"],[37.650498,-122.068242,"Raising Cane's #589 (Hayward)"],[37.649757,-122.081524,"Garden Walk/Huntwood - 25445 Huntwood Ave, Hayward"],[37.650345,-122.087687,"Eden Issei - 200 Fagundes Street, Hayward"],[37.6288,-122.047219,"Atlas @ Mission Village - 29706 Hansen St, Hayward"],[37.611443,-122.027336,"Sara Conner Court - 32540 Pulaski Drive, Hayward"],[37.528051,-122.055479,"Newark Gateway HOA - 8559 Mahogany Place, Newark (Hayward)"],[37.676984,-122.077865,"Silvergate Condos (Hayward)"],[37.670368,-122.090668,"Glen Eden - 561 A Street, Hayward"],[37.677821,-122.093767,"Montgomery Plaza - 21659 Montgomery Street, Hayward"],[37.651448,-122.126752,"1844 W Winton Ave, Hayward"],[37.646837,-122.121908,"Natural Formulas - 2125 American Avenue, Hayward"],[37.669508,-122.091247,"Sycamore Square - 22560 Alice Street, Hayward"],[37.632211,-122.052325,"Sycamore Square 363 - 363 Valle Vista, Hayward"],[37.403486,-122.117649,"Peninsula Real (Los Altos)"],[37.234419,-121.978689,"Chapel of the Hills - Darling Fisher - all on on one job (Lo"],[37.418876,-121.922123,"SanDisk (Milpitas)"],[37.451035,-121.919476,"Waterstone (Milpitas)"],[37.421405,-121.884932,"963 Ames (Milpitas)"],[37.407342,-121.91536,"CS Bio (Milpitas)"],[37.371396,-122.062163,"Cuernavaca (Mountain View)"],[37.407885,-122.092008,"1983 San Luis (Mountain View)"],[37.526071,-121.999227,"Costco Newark"],[37.521294,-122.03633,"7411 Central (Newark)"],[37.520587,-122.049918,"Newark Station"],[37.444329,-122.133266,"First Congregational Church of Palo Alto"],[37.418267,-122.130635,"Woodcrest - 393 Curtner Ave, Palo Alto"],[37.440403,-122.158683,"909 Alma (Palo Alto)"],[37.252564,-121.79694,"5500 Monterey Road (San Jose)"],[37.318066,-121.810508,"Costco Evergreen (San Jose)"],[37.308248,-121.885898,"Willow Glen Creek HOA (San Jose)"],[37.304303,-121.951222,"Bethel Church San Jose"],[37.257893,-121.778306,"Family Community Church (San Jose)"],[37.268463,-121.90709,"Meridian at Wllow Glen (San Jose)"],[37.319269,-121.808602,"Raising Cane's #845 (San Jose)"],[37.381708,-121.899534,"880 Ridder (San Jose)"],[37.390322,-121.896867,"1941 Ringwood (San Jose)"],[37.373115,-121.844673,"Raising Cane's #722 (San Jose)"],[37.410827,-121.941221,"105 E Tasman (San Jose)"],[37.389792,-121.896283,"1921 Ringwood (San Jose)"],[37.389661,-121.89643,"CH Reynolds (San Jose)"],[37.353239,-121.851547,"Mayfair Apartments (San Jose)"],[37.365165,-121.865423,"City Wide 1800-1810 Dobbin Drive (San Jose)"],[37.335096,-121.853296,"AMS (San Jose)"],[37.364794,-121.866242,"City Wide 660 North King Road (San Jose)"],[37.341132,-121.880898,"Darling Fischer Garden Chapel - all on one job (San Jose)"],[37.334868,-121.852653,"1123-1135 Olinder (San Jose)"],[37.698124,-122.113921,"Quail Run Apartments - 1511 163rd Avenue, San Leandro"],[37.704867,-122.157485,"Teagarden Street (San Leandro)"],[37.726028,-122.149514,"Joaquin Avenue - 500 Joaquin Avenue, San Leandro"],[37.684367,-122.117005,"Paseo Grande - 11 Paseo Grande, San Lorenzo"],[37.373527,-121.958593,"Roche Santa Clara"],[37.360093,-121.942217,"Avis Budget - 552 Reed (Santa Clara)"],[37.36653,-121.994076,"Bethel Church Santa Clara"],[37.348475,-122.042737,"Church of the Resurrection (Sunnyvale)"],[37.384612,-121.989455,"535 Oakmead, Sunnyvale (Oakmead Parkway)"],[37.371999,-121.994387,"Costco Sunnyvale"],[37.584602,-122.023188,"USA Vintage Court Senior Apts (Union City)"],[37.337324,-122.085875,"Forum - 10 minutes from Santana Row (Cupertino)"],[37.153633,-121.657924,"Madrone Business Park (Gilroy)"],[37.011672,-121.597061,"Valley Oaks II HOA (Gilroy)"],[37.012251,-121.583556,"Mission Park Apartments (Gilroy)"],[36.988578,-121.559519,"Hilton Garden Inn Gilroy"],[37.392832,-122.123473,"The Terraces Los Altos"],[37.250928,-121.956747,"Bellaterra HOA (Los Gatos)"],[37.255549,-121.967144,"Bay Club Courtside (Los Gatos)"],[37.2227,-121.982502,"Old Towne Los Gatos"],[37.253031,-121.961442,"Levy Family Campus (Los Gatos)"],[37.235829,-121.962334,"Cornerstone of Los Gatos"],[37.451302,-122.15589,"750 University (Los Gatos)"],[37.251227,-121.955997,"Market Hall (next to BellaTerra) (Los Gatos)"],[37.143526,-121.657031,"18255 Sutter Blvd (Morgan Hill)"],[37.155095,-121.658739,"CTC Morgan Hill II - 18640 Madrone"],[37.150569,-121.657041,"Madrone Village Shopping Center (Morgan Hill)"],[37.150842,-121.657922,"18630 Sutter Blvd (Morgan Hill)"],[37.151231,-121.658522,"18640 Sutter Blvd (Morgan Hill)"],[37.14951,-121.659235,"350 Woodview Avenue (Morgan Hill)"],[37.156109,-121.651367,"Cochrane Business Ranch -Sutter Boulevard, Woodview Ave, Coc"],[37.151234,-121.663806,"Silicon Valley Glass - 18695 Madrone Parkway (Morgan Hill)"],[37.148841,-121.660044,"355-365 Woodview Avenue (Morgan Hill)"],[37.150735,-121.659162,"18635 Sutter Blvd (Morgan Hill)"],[37.153606,-121.6587,"Applied Motion Products - 18645 Madrone (Morgan Hill)"],[37.150036,-121.658373,"18625 Sutter Blvd (Morgan Hill)"],[37.150036,-121.658373,"18625 Sutter Blvd - Courtyard (Morgan Hill)"],[37.320909,-121.947489,"Santana Row (San Jose)"],[37.250948,-121.797464,"Station 121 (San Jose)"],[37.318316,-121.951105,"Winchester Mystery House (San Jose)"],[37.321898,-121.9482,"Misora Apartments (San Jose)"],[37.382747,-121.924275,"2460-2480 North First Street (San Jose)"],[37.257365,-121.86309,"One Pearl Place (San Jose)"],[37.320958,-121.946612,"Levare Apartments (San Jose)"],[37.34213,-121.924093,"1960 The Alameda (San Jose)"],[37.317865,-121.949489,"550 South Winchester (San Jose)"],[37.410677,-121.943014,"91 E. Tasman (San Jose)"],[37.317795,-121.947272,"3031 Tisch Way (San Jose)"],[37.33973,-121.92256,"1871 The Alameda (San Jose)"],[37.363683,-121.890255,"761-765 Mabury Road (San Jose)"],[37.376298,-121.91567,"111-151 Brokaw Road +339 +226 (San Jose)"],[37.363749,-121.881489,"985 Timothy Drive (San Jose)"],[37.318806,-121.94736,"Meso (Santana Row) (San Jose)"],[37.3212,-121.948022,"Mendocino Farms Santana Row (San Jose)"],[37.318949,-121.882543,"201 Willow Street - Toeniskoetter (San Jose)"],[37.376158,-121.986056,"Bay Club Santa Clara"],[37.382339,-121.941702,"3200-3210 De La Cruz / 445 Laurelwood (Santa Clara)"],[36.976877,-122.029256,"133 Mission St (Santa Cruz)"],[37.062976,-122.006888,"Granite Creek Business Park (Scotts Valley)"],[37.060689,-122.007867,"5550 Scotts valley dr"],[37.059746,-122.008126,"Digital Dynamics (Scotts Valley)"],[37.373363,-121.989475,"Kifer Commerce Condominium (Sunnyvale)"],[37.341243,-122.043408,"Rhonda Village (Sunnyvale)"],[37.261967,-121.966241,"El Camino Hospital - 555 Knowles (Los Gatos)"],[37.293384,-121.958909,"El Camino Hospital - 429 Llewellyn Ave (Campbell)"],[37.322508,-122.012691,"19400 Stevens Creek, part of El Camino Hospital, separate bi"],[37.549178,-122.065112,"Meta CBRE - FRE 114 -6552 Kaiser Drive (Fremont)"],[37.549958,-122.063997,"Meta CBRE - FRE 120 - 6504 Kaiser Drive (Fremont)"],[37.546505,-122.061442,"Meta CBRE - FRE 126 -6750 Dumbarton Circle (Fremont)"],[37.545611,-122.062748,"Meta CBRE - FRE 127 - 6800  Dumbarton Circle (Fremont)"],[37.544885,-122.063763,"Meta CBRE - FRE 128 - 6900 Dumbarton Circle (Fremont)"],[37.54997,-122.060233,"Meta CBRE - FRE 123 - 6519 Dumbarton Circle (Fremont)"],[37.550734,-122.060692,"Meta CBRE - FRE 124 - 6503 Dumbarton Circle (Fremont)"],[37.546794,-122.066043,"Meta \"The Farm\" FRE 111 - 34800 Campus Dr (Fremont)"],[37.548764,-122.066479,"Meta \"The Farm\" FRE 113 - 34700 Campus Dr (Fremont)"],[37.54776,-122.066256,"Meta \"The Farm\" FRE 112 - 34750 Campus Drive (Fremont)"],[37.546046,-122.06567,"Meta CBRE - FRE 110 - 7601 Dumbarton Circle (Fremont)"],[37.54729,-122.060382,"Meta CBRE - FRE 125 -  6700 Dumbarton Circle (Fremont)"],[37.549757,-122.063331,"Meta \"The Farm\" FRE 115 - 6540 Kaiser Drive (Fremont)"],[37.547892,-122.062209,"Meta \"The Farm\" FRE 118 - 6591 Dumbarton Circle (Fremont)"],[37.547863,-122.064042,"Meta \"The Farm\" FRE 117 - 6611 Dumbarton Circle (Fremont)"],[37.54917,-122.061124,"Meta CBRE - FRE 122 - 6539 Dumbarton Circle (Fremont)"],[37.546489,-122.064041,"Meta CBRE - FRE 116 - 6623 Dumbarton Circle (Fremont)"],[37.503632,-121.980478,"Meta - Fre2700 42700 Boyce Rd (Fremont)"],[37.262306,-121.966911,"El Camino Hospital Owned (Los Gatos)"],[37.451461,-121.920616,"1533 California - part of El Camino Hospital - separate (Mil"],[37.368323,-122.082064,"El Camino Hospital - 2500 Hospital Association - (Mountain V"],[37.383424,-122.079972,"399 W. El Camino Real (Mountain View)"],[37.368323,-122.082064,"El Camino Hospital 2500 Hospital Buidling 7 (Mountain View)"],[37.521253,-122.04403,"Meta - OAK101 8130 Enterprise (Newark)"],[37.398954,-122.141971,"Cardinal 2025 Propco - was Broadcom Lease B (Palo Alto)"],[37.398954,-122.141971,"VMWare/ Broadcom (Palo Alto)"],[37.382896,-121.926111,"Ebay (San Jose)"],[37.250824,-121.948548,"2460 Samaritan Drive (San Jose)"],[37.392842,-122.046966,"LinkedIn Sunnyvale Campus - National Accounts"],[37.381984,-122.034246,"Sunnyvale Business Park"],[37.321693,-122.030337,"CCC Common Area (Cupertino)"],[37.321693,-122.030337,"20400/20450 Stevens Creek - CCC (Cupertino)"],[37.321433,-122.029582,"CCC Garage (Cupertino)"],[37.488526,-121.957027,"LAM Research (Fremont)"],[37.501836,-121.938469,"BART, Warm Springs, 45193 Warm Springs Blvd, Fremont"],[37.472476,-121.934601,"47281-47361 Bayside Parkway (Fremont)"],[37.481075,-121.942188,"3400-3450 Warren Avenue (Fremont)"],[37.460645,-121.920567,"48900 Milmont (Fremont)"],[37.49208,-121.952206,"LAM Research - 45700 Northport Loop (Fremont)"],[37.481075,-121.942188,"3400-3500 Warren (3500-3550 W Warren) (Fremont)"],[37.475059,-121.93549,"47200 Bayside (Fremont)"],[37.55402,-121.976763,"Civic Center Place (Fremont)"],[37.546734,-122.053617,"Challenger Ardenwood (Newark)"],[37.44549,-122.12132,"Oregon Green HOA (Palo Alto)"],[37.437665,-122.173009,"Old Winery /Stanford Barn (Palo Alto)"],[37.420405,-122.111792,"Challenger Middlefield (Palo Alto)"],[37.423132,-122.104716,"3960 - 3980 Fabian Way (Palo Alto)"],[37.451302,-122.15589,"Villa Capri Aire HOA (Palo Alto)"],[37.450509,-122.123022,"BGOGC 2197 Bayshore Owner LLC (Palo Alto)"],[37.449965,-122.120976,"BGOGC 2225 Bayshore Owner LLC (Palo Alto)"],[37.405969,-122.14599,"3330 Hillview (Palo Alto)"],[37.400627,-121.9322,"Broadcom - 228-280 Innovation (San Jose)"],[37.385344,-121.90008,"Broadcom - 1310-1320 Ridder Park (San Jose)"],[37.385689,-121.902498,"Broadcom - 1730 Fox Drive (San Jose)"],[37.370851,-121.896074,"Challenger Gish Road (Berryessa) (San Jose)"],[37.311472,-121.845501,"Service Station Systems (San Jose)"],[37.721759,-122.160828,"BART San Leandro, 1401 San Leandro Blvd"],[37.37268,-121.967863,"Nvidia (Santa Clara)"],[37.373305,-121.964049,"Nvidia Buildings S, T, U (Santa Clara)"],[37.335512,-122.015065,"Kimco -Cupertino Village #113440"],[37.318889,-122.04091,"LDS - Stelling (Cupertino)"],[37.311161,-122.02581,"LDS - Bollinger (Cupertino)"],[36.939248,-121.776175,"Kimco - Freedom Centre #120020"],[37.467677,-121.903663,"LDS - Scott Creek (Fremont)"],[37.574527,-122.029889,"LDS - Decoto (Fremont)"],[37.560635,-121.96844,"LDS - Walnut - Central Park, Fremont (SL)"],[37.467677,-121.903663,"LDS - Fremont CA Stk-Lurc-48950 Green Valley"],[37.662051,-122.056748,"LDS - 2000 Highland Blvd, Hayward"],[37.394404,-122.111421,"LDS - 190 Jordan - Los Altos"],[37.358928,-122.07852,"LDS - 1300 Grant - Los Altos"],[37.262306,-121.966911,"El Camino Hospital  Leased (Los Gatos)"],[37.235906,-121.985208,"LDS - Rose (Los Gatos)"],[37.132582,-121.959165,"LDS - 23185 Summit Road, Los Gatos"],[37.42228,-121.91828,"Milpitas Square"],[37.414947,-121.890005,"Siena HOA (Milpitas)"],[37.444454,-121.876646,"Bayview Park HOA (Milpitas)"],[37.419583,-121.887378,"Evoqua (Milpitas)"],[37.400868,-122.057864,"The Vineyard (Mountain View)"],[37.405101,-122.057089,"Locus Technologies (Mountain View)"],[37.535749,-122.043669,"LDS - Haley (Newark)"],[37.421489,-122.11028,"LDS - Middlefield (Palo Alto)"],[37.414888,-122.112413,"Green Meadow (Palo Alto)"],[37.424233,-122.15183,"LDS - Palo Alto California Institute"],[37.322137,-121.995112,"Kimco - Stevens Creek Central #118190 (San Jose)"],[37.390098,-121.884969,"Costco NE San Jose #1004 - 1704 Automation"],[37.285608,-121.860669,"Tuscany Hill HOA  (Chianti) (San Jose)"],[37.307475,-121.810628,"Kimco - Silvercreek Plaza #118840 (San Jose)"],[37.292263,-121.814534,"LDS - McLaughin (San Jose)"],[37.294597,-121.76918,"LDS - 4977 San Felipe Road (San Jose)"],[37.375321,-121.851095,"Mabury Manor (San Jose)"],[37.310941,-121.983895,"LDS - Cera (San Jose)"],[37.330835,-121.894251,"Adobe - San Jose Founders  Tower"],[37.321128,-121.823853,"Lion Plaza (San Jose)"],[37.267063,-121.822799,"Lifemoves - 1 Branham (San Jose)"],[37.378858,-121.839869,"LDS - Patt (San Jose)"],[37.229029,-121.773222,"LDS - Bernal (San Jose)"],[37.247219,-121.834662,"LDS - Comanche (San Jose)"],[37.221865,-121.853724,"LDS - Camden (San Jose)"],[37.330835,-121.894251,"Adobe - San Jose Towers"],[37.302278,-121.90364,"LDS - Cherry Historic Building (San Jose)"],[37.409085,-121.869024,"LDS - Cropley (San Jose)"],[37.260966,-121.907116,"LDS - 1655 Noreen Drive - Cambrian Park Hillsdale (San Jose)"],[37.398587,-121.911354,"1060 Rincon Circle (San Jose)"],[37.299578,-121.951881,"Oak Tree Gardens - 3145 Loma Verde Drive - San Jose - MB Man"],[37.292715,-121.877352,"2102 Almaden - San Jose"],[37.347761,-121.904829,"LifeMoves (San Jose)"],[37.331473,-121.895271,"Adobe - McEnery Park (San Jose)"],[37.338137,-121.882988,"LDS - 66 South 7th Street (San Jose)"],[37.322766,-121.994569,"Kimco - On the Corner @ Stevens Creek #118630 (San Jose)"],[37.688699,-122.136406,"Kimco - Grenhouse Marketplace #120260 (San Leandro)"],[37.701362,-122.128829,"Kimco - Fashion Faire Place #114550 (San Leandro)"],[37.714255,-122.139571,"LDS - 13901 Bancroft Avenue - San Leandro"],[37.681098,-122.134693,"LDS - 859 Grant Avenue, San Lorenzo"],[37.390356,-121.974457,"Santa Clara Marriott"],[37.387377,-121.944877,"North Valley Baptist Church (Santa Clara)"],[37.340508,-121.985735,"LDS - Quince (Santa Clara)"],[37.40286,-121.977069,"Santa Clara Hilton"],[37.380859,-121.978396,"3303 Scott Blvd (Santa Clara)"],[37.371616,-121.971465,"2775 Northwestern parkway, Santa Clara"],[37.267268,-122.00541,"LDS - Saratoga CA LURC Pavlion Ballfied"],[37.26631,-122.005936,"LDS - Saratoga California Institute"],[37.352923,-122.044356,"LDS - Fremont Ave (Sunnyvale)"],[37.353078,-122.005426,"Belmont Village of Sunnyvale"],[37.375341,-122.016179,"740 Kifer (Sunnyvale)"],[37.586996,-122.025146,"LDS - Union City"],[37.55255,-122.027432,"Dumbarton Bridge (Fremont)"],[37.652339,-122.09065,"San Mateo Bridge (Hayward)"],[37.394366,-122.146752,"1070 Arastradero (Palo Alto)"],[37.422376,-122.145942,"777 California (Palo Alto)"],[37.63219,-122.425621,"SMCOE  Vocational Ed. Center - 1280 Commodore Drive (San Bru"],[37.26515,-121.792517,"The Plex (San Jose)"],[37.412292,-121.939845,"Venue (San Jose)"],[37.090806,-122.088535,"LDS - 9545 Love Creek Road, Ben Lamond - San Lorenzo"],[37.286303,-121.959978,"Seventh Day Adventist Church Campbell"],[37.286303,-121.959978,"Saniku Gakuin Japanese School (Campbell)"],[36.974289,-121.963552,"Whole Foods Capitola"],[37.318388,-122.029684,"Sterling Square (Cupertino)"],[37.322187,-122.030192,"Verona Condos (Cupertino)"],[37.012704,-121.582194,"LDS- 7999 Miller Avenue (Gilroy)"],[36.318263,-121.247381,"LDS - 1145 Oak Avenue (Greenfield)"],[36.836829,-121.401284,"LDS - 1670 Cienega Road (Hollister)"],[37.376282,-122.115474,"350 Second Street (Los Altos)"],[37.377105,-122.115525,"309 Second (Los Altos)"],[37.427195,-121.883629,"555 Apartments (Milpitas)"],[37.396362,-121.902886,"DC Glaziers Union (Milpitas)"],[36.585196,-121.915706,"LDS -1 Skyline Forest Drive (Monterey)"],[37.126408,-121.635388,"Cottage Green/Creek (Morgan Hill)"],[37.13784,-121.617982,"El Dorado HOA (Morgan Hill)"],[37.146418,-121.66199,"Cochrane Morgan Hill EAH"],[37.135929,-121.62046,"LDS - 1790 East Dunne Avenue (Morgan Hill)"],[37.147248,-121.660089,"Raising Cane's (Morgan Hill)"],[37.420947,-122.095643,"Costco Mountain View"],[37.401914,-122.051009,"Green Puddle- 605 Ellis (Mountain View)"],[37.408318,-122.150134,"3165 Porter (Palo Alto)"],[37.418169,-122.148176,"2625 Hanover (Palo Alto)"],[36.710924,-121.650769,"Regency Court (Salinas)"],[36.708099,-121.647106,"LDS - 255 East Alvin Drive (Salinas)"],[37.244946,-121.885017,"Parkvillas Peppertree (San Jose)"],[37.265132,-121.845662,"Carlton Senior Living San Jose"],[37.330054,-121.8132,"Flexcar 2198 Tully (San Jose)"],[37.314788,-121.854595,"Paseo Senter I (San Jose)"],[37.314709,-121.853489,"Paseo Senter II (San Jose)"],[37.358219,-121.90064,"1050 N. 5th Street (San Jose)"],[37.307992,-121.973208,"Saratoga Grove  - 4040 Williams Road -includes 1030 and 1040"],[37.3075,-121.973957,"Saratoga Grove  - 4060 Williams Road (San Jose)"],[37.305245,-121.973751,"Rancho Grove (San Jose)"],[37.305015,-121.973129,"Citron Place (San Jose)"],[37.306684,-121.973794,"Villa Rancho (San Jose)"],[37.345215,-121.996539,"The Laurelwood (Santa Clara)"],[36.984693,-122.033355,"Costco Santa Cruz"],[36.990272,-122.004174,"LDS - Capitola - 220 Elk Street, Santa Cruz"],[36.597589,-121.837313,"LDS -1024 Noche Buena Street (Seaside)"],[36.61714,-121.843843,"Tesla - 1901 Del Monte Blvd (Seaside)"],[37.375601,-122.011297,"Fortinet - Lump Sum (5 sites) (Sunnyvale)"],[37.39798,-122.031151,"St. Jude Medical - ABBOTT (Sunnyvale)"],[37.398798,-122.022744,"Borregas Court (Sunnyvale)"],[37.373566,-122.058819,"Sunrise of Sunnyvale"],[37.387104,-122.01019,"Sunnyvale High School"],[36.920685,-121.787796,"LDS  - 255 Holm Road, Watsonville"]];
+const NEW_BRANCH_JOBS=[[37.399231,-122.051934,"Google - MTV E475 - 475 Ellis (Mountain View)"],[37.425794,-122.097238,"Google - MTV BAYSH2598 - 2598 Bayshore (Mountain View)"],[37.407357,-122.076113,"Google - MTV 946- 946 Linda Vista (Mountain View)"],[37.427791,-122.098978,"Google - MTV 2700 - 2700 Garcia (Mountain View)"],[37.431796,-122.099704,"Google - MTV 1161 - 1161 San Antonio Rd (Mountain View)"],[37.428568,-122.099474,"Google - MTV 2644 - 2644-48 Bayshore (Mountain View)"],[37.431078,-122.099991,"Google - MTV 1157 - 1157 San Antonio Rd (Mountain View)"],[37.43096,-122.099178,"Google - MTV 2751 - 2751 Marine Way (Mountain View)"],[37.42864,-122.098525,"Google - MTV 2637 - 2637 Marine Way (Mountain View)"],[37.432491,-122.098124,"Google - MTV 2690 - 2690 Casey (Palo Alto)"],[37.431821,-122.10093,"Google - PAO 1129 - 1129 San Antonio (Palo Alto)"],[37.431095,-122.10209,"Google - PAO 1010 - 1010 Corporation Way (Palo Alto)"],[37.433399,-122.102737,"Google - PAO 1137 - 1137 San Antonio Rd (Palo Alto)"],[37.43227,-122.101452,"Google - PAO 1133 - 1133 San Antonio (Palo Alto)"],[37.432802,-122.10227,"Google - PAO 1135 - 1135 San Antonio Road (Palo Alto)"],[37.399706,-122.193014,"Ladera Park Professional Center (Portola Valley)"],[37.489947,-122.22808,"900 Veterans (Redwood City)"],[37.54347,-122.301461,"Station 1 - 2750 S Delaware (San Mateo)"],[37.541096,-122.298916,"Delaware Street Properties (San Mateo)"],[37.541394,-122.299706,"Bay Meadows Station 5 (San Mateo)"],[37.541096,-122.298916,"Bay Meadows Station 4 (San Mateo)"],[37.541394,-122.299706,"Bay Meadows Station 3 (San Mateo)"],[37.542411,-122.300377,"Bay Meadows Station 2 (San Mateo)"],[37.662493,-122.396253,"The Cove Oyster Point (South San Francisco)"],[37.656324,-122.390235,"Healthpeak Phase 1 (BM Dir combines phase 1 and 2) (South Sa"],[37.656324,-122.390235,"Healthpeak Phase 2 (South San Francisco)"],[37.656324,-122.390235,"Healthpeak Phase 3 (South San Francisco)"],[37.415643,-122.018076,"Google Caribbean US-SVL-CRBN100 (Sunnyvale)"],[37.408499,-122.011825,"Google US-SVL-CRSM1265 (Sunnyvale)"],[37.416322,-122.015639,"Google Caribbean - US-SVL-CRBN200 (Sunnyvale)"],[37.408075,-122.013139,"Google US-SVL-CRSM1249 (Sunnyvale)"],[37.407363,-122.012263,"Google US-SVL-CRSM1225 (Sunnyvale)"],[37.408669,-122.009754,"Google US-SVL-CRSM1240 (Sunnyvale)"],[37.409526,-122.009963,"Google US-SVL-CRSM1260 (Sunnyvale)"],[37.452816,-122.238011,"1700 Fernside Dr. - Woodside"],[37.67722,-122.466096,"Raising Cane's #941 (Colma)"],[37.463719,-122.15802,"68 Willow (Menlo Park)"],[37.452923,-122.183075,"611 Santa Cruz Ave. (Menlo Park)"],[37.476751,-122.199427,"3425 Edison Way/Orchard Project 7245 (Menlo Park)"],[37.4032,-122.19755,"Woodland School (Portola Valley)"],[37.494157,-122.227829,"San Mateo Credit Union  Convention Way (Redwood City)"],[37.634071,-122.39801,"Costco S San Francisco"],[37.627977,-122.426963,"Google - SBO 901 - 901 Cherry (San Bruno)"],[37.626903,-122.428259,"Google - SBO-1450 Bayhill - (San Bruno)"],[37.627884,-122.427473,"Google - SBO-1400 Bayhill - (San Bruno)"],[37.629241,-122.425663,"Google - SBO 1000 - 1000 Cherry (San Bruno)"],[37.62814,-122.425175,"Google - SBO 900 - 900 Cherry (San Bruno)"],[37.630124,-122.422491,"Google - SBO 1100 - 1100 Grundy (San Bruno)"],[37.626811,-122.427916,"Google - SBO-1500 Bayhill (San Bruno)"],[37.646008,-122.400269,"Google - SSF-UTAH 180 -180 Utah Avenue (South San Francisco)"],[37.590415,-122.337225,"Meta - BUR 101 (Burlingame)"],[37.590423,-122.335834,"Meta - BUR 102 (Burlingame)"],[37.589869,-122.336013,"Meta - BUR 103 (Burlingame)"],[37.589801,-122.337022,"Meta - BUR 105 (Burlingame)"],[37.589775,-122.336392,"Meta - BURP1 (Burlingame)"],[37.589133,-122.337156,"Meta - BUR 104 (Burlingame)"],[37.598602,-122.380662,"Meta - BURT01 (Burlingame)"],[37.484197,-122.147902,"Meta Classic Campus (Menlo Park)"],[37.485372,-122.177293,"Snowflake  - MPK 62 (Menlo Park)"],[37.485053,-122.176217,"Snowflake  - MPK 63 (Menlo Park)"],[37.479955,-122.169057,"Meta - MPK 24 - Chilco Campus (Menlo Park)"],[37.481793,-122.175106,"Moloco - 135 Commonwealth (Menlo Park)"],[37.481538,-122.168928,"Meta - MPK 29 - Chilco Campus (Menlo Park)"],[37.48085,-122.170346,"Meta - MPK 25 - Chilco Campus (Menlo Park)"],[37.481279,-122.170992,"Meta - MPK 26 - Chilco Campus (Menlo Park)"],[37.481768,-122.17008,"Meta - MPK 281 - Chilco Campus (Menlo Park)"],[37.485253,-122.178006,"Snowflake - Parking lot 1 (Menlo Park)"],[37.484482,-122.174912,"Snowflake - Parking lot 2 (Menlo Park)"],[37.482683,-122.170711,"Meta - MPK 282 - Chilco Campus (Menlo Park)"],[37.48285,-122.168755,"Meta - MPK 286 - Chilco Campus (Menlo Park)"],[37.482663,-122.16813,"Meta - MPK 287 - Chilco Campus (Menlo Park)"],[37.482107,-122.17102,"Meta - MPK280 - Chilco Campus (Menlo Park)"],[37.483099,-122.169499,"Meta - MPK 284 - Chilco Campus (Menlo Park)"],[37.483269,-122.170081,"Meta - MPK 283 - Chilco Campus (Menlo Park)"],[37.482487,-122.169933,"Meta - MPK 285 - Chilco Campus (Menlo Park)"],[37.488195,-122.207503,"Meta - RWC 104 - Chilway PM (Redwood City)"],[37.405759,-122.253796,"Mountain Home - 3000 Portola (Woodside)"],[37.421761,-122.090224,"Google - MTV 1965 - 1965 Charleston (Mountain View)"],[37.422553,-122.090507,"Google - MTV 1945 - 1945 Charleston (Mountain View)"],[37.420107,-122.084581,"Google - 1665 Charleston (Mountain View)"],[37.423885,-122.091641,"Google - MTV GWC1 - 2025 Garcia (Mountain View)"],[37.423163,-122.092484,"Google - MTV GWC3 - 1505 Salado (Mountain View)"],[37.423912,-122.092532,"Google - MTV GWC2 - 1501 Salado (Mountain View)"],[37.398179,-122.049372,"Google - MTV L441 - 441 Logue (Mountain View)"],[37.397481,-122.049459,"Google - MTV M800 - 800 Maude (Mountain View)"],[37.397788,-122.047478,"Google - MTV C450 - 450 Clyde (Mountain View)"],[37.397341,-122.047394,"Google - MTV C440 - 440 Clyde (Mountain View)"],[37.43043,-122.107199,"Google US-PAO-EM15 (Palo Alto)"],[37.428679,-122.107754,"Google US-PAO-EM925 (Palo Alto)"],[37.432344,-122.108181,"Google US-PAO-EM40 (Palo Alto)"],[37.429308,-122.108814,"Google US-PAO-EM76 (Palo Alto)"],[37.431907,-122.107412,"Google US-PAO-EM36 (Palo Alto)"],[37.430801,-122.107814,"Google US-PAO-EM25 (Palo Alto)"],[37.429089,-122.108323,"Google US-PAO-EM86 (Palo Alto)"],[37.431322,-122.106591,"Google US-PAO-EM20 (Palo Alto)"],[37.519129,-122.265988,"150 Industrial (San Carlos)"],[37.551776,-122.264059,"LDS - Foster City"],[37.448614,-122.192697,"LDS - Valparaiso - Alvarado Niles (Menlo Park)"],[37.527314,-122.5142,"LDS - Moss Beach"],[37.58488,-122.487047,"Kimco - Linda Mar #111150 (Pacifica)"],[37.63308,-122.475548,"LDS - Sharp Park (Pacifica)"],[37.53516,-122.237638,"Bridgeport HOA (Redwood City)"],[37.478904,-122.259816,"LDS - Edgewood (Redwood City)"],[37.634732,-122.42496,"LDS - San Bruno"],[37.634123,-122.423905,"LDS - Tongan Center (San Bruno)"],[37.550948,-122.291797,"One90 HOA (San Mateo)"],[37.530098,-122.306544,"LDS - San Mateo"],[37.447177,-122.209579,"Wang Maintenance (Atherton)"],[37.5233,-122.27661,"The Hayden Belmont"],[37.590048,-122.34299,"Hilton SF Airport (Burlingame)"],[37.590208,-122.34699,"Bayside Plaza (Burlingame)"],[37.591728,-122.368556,"Aerobay Office Center (Burlingame)"],[37.599643,-122.369553,"1633 Bayshore (Burlingame)"],[37.592278,-122.386172,"Oakmont of Burlingame"],[37.590473,-122.339601,"433 Airport Blvd (Burlingame)"],[37.59805,-122.368499,"Hinckley Warehouse (Burlingame)"],[37.577649,-122.351197,"1450 Chapin - DCL (Burlingame)"],[37.579282,-122.344443,"250 California (Burlingame)"],[37.503372,-122.249272,"930 Brittan - DLC (Burlingame)"],[37.578666,-122.345377,"240 Lorton - DCL (Burlingame)"],[37.578715,-122.344975,"228 Lorton (Burlingame)"],[37.579059,-122.344513,"225 California - DCL (Burlingame)"],[37.682616,-122.465179,"La Scala HOA (Colma)"],[37.670685,-122.463354,"Tesla - NA US CA Serramonte 1500 Collins Avenue - Colma"],[37.669463,-122.464645,"Serramonte HOA (Daly City)"],[37.689504,-122.466494,"22 San Pedro - Daly City"],[37.55903,-122.276252,"Visa (Foster City)"],[37.560837,-122.271035,"1065 E Hillsdale (Foster City)"],[37.419842,-122.204134,"SLAC (Menlo Park)"],[37.458023,-122.172208,"525/535/545 Middlefield (Menlo Park)"],[37.429093,-122.204475,"Phillips Brook School (Menlo Park)"],[37.419842,-122.204134,"SLAC Quads (Menlo Park)"],[37.460697,-122.1613,"Willow Wood HOA (Menlo Park)"],[37.39061,-122.049119,"Mountain View Research Park - Boston Prop"],[37.399303,-122.107782,"2440 W El Camino Real - Boston Prop (Mountain View)"],[37.390597,-122.051135,"453 Ravendale - Boston Prop (Mountain View)"],[37.453756,-122.261064,"Shinnyoen HQ (Redwood City)"],[37.525879,-122.263057,"San Mateo Office of Education - 101 Twin Dolphin Drive (Redw"],[37.485642,-122.22955,"889 Winslow Street (Redwood City)"],[37.510731,-122.209013,"Sims Metal Management (Redwood City)"],[37.636835,-122.420181,"Shops at Tanforan (San Bruno)"],[37.631963,-122.426356,"SMCOE  Palos Verdes - 1290 Commodore Drive (San Bruno)"],[37.50479,-122.261966,"Pacific Hacienda HOA (San Carlos)"],[37.503226,-122.250002,"1030 Brittain (San Carlos)"],[37.776501,-122.388143,"China Basin Park - Park, Streets, SIP North, SIP Berms (San "],[37.808673,-122.409821,"Pier 39 (San Francisco)"],[37.797426,-122.398179,"Embarcadero Square (San Francisco)"],[37.791047,-122.400047,"Mission Rock Parcel B (San Francisco)"],[37.775773,-122.388653,"Visa World Headquarters - San Francisco"],[37.771387,-122.394445,"Arden Owners Association (San Francisco)"],[37.612892,-122.39401,"Grand Hyatt at SFO (San Francisco)"],[37.775918,-122.389324,"Canyon Apartments (San Francisco)"],[37.744293,-122.437975,"Delphine on Diamond (San Francisco)"],[37.773306,-122.420906,"The Brady (San Francisco)"],[37.78614,-122.40257,"706 Mission Street (San Francisco)"],[37.769733,-122.401867,"1 De Haro - San Francisco"],[37.786631,-122.398289,"LinkedIn San Francisco Campus - National Accounts"],[37.792302,-122.411464,"Pacific Union Club (San Francisco)"],[37.775173,-122.388612,"Verde Apartments - Greystar (San Francisco)"],[37.785106,-122.39877,"50 Hawthorne/680 Folsom/690 Folsom - Boston Prop (San Franci"],[37.790694,-122.391476,"Gap Inc.  2 Folsom (San Francisco)"],[37.772354,-122.390975,"Strata at Mission Bay (San Francisco)"],[37.806587,-122.418013,"Hotel Caza (San Francisco)"],[37.76979,-122.409876,"1201 Bryant St (San Francisco)"],[37.775758,-122.389691,"Mission Rock Parcel A (San Francisco)"],[37.78651,-122.392225,"401 Harrison (San Francisco)"],[37.805655,-122.416468,"Marriott Pulse - 4 mh (San Francisco)"],[37.782784,-122.391385,"270 Brannan (San Francisco)"],[37.788878,-122.398134,"535 Mission Street - Boston Prop (San Francisco)"],[37.789556,-122.396905,"Salesforce Tower - Boston Prop (San Francisco)"],[37.758851,-122.390931,"953 Indiana - DCL (San Francisco)"],[37.775253,-122.388551,"365 Toni Stone Crossing (Floor 3) Tishman Speyr (San Francis"],[37.775758,-122.389691,"Mission Rock Parcel G planter (San Francisco)"],[37.543102,-122.285302,"San Mateo Office Plaza (was 3130 La Selva)"],[37.512782,-122.333448,"35 Tower Road - San Mateo"],[37.514785,-122.334312,"SMCOE  61-69 Tower Rd. (San Mateo)"],[37.643085,-122.454686,"Westborough Professional Center (South San Francisco)"],[37.642958,-122.411392,"1305 San Mateo Avenue (South San Francisco)"],[37.5289,-122.257718,"350 Marine Parkway (Redwood City)"]];
+const OLD_BASE={lat:37.420834,lng:-121.884064,name:'1250 Ames Ave, Milpitas — Old branch'};
+const NEW_BASE={lat:37.596600,lng:-122.361200,name:'825 Mahler Rd, Burlingame — New branch'};
+function loadPreset(base, jobs){
   state.base=null; state.jobs=[]; clearResult();
-  setBase(37.8044,-122.2712,'Oakland — Base');
-  [['San Francisco — Civic Center',37.7793,-122.4193],['Berkeley',37.8715,-122.2730],
-   ['Richmond',37.9358,-122.3477],['Fremont',37.5485,-121.9886],['Hayward',37.6688,-122.0808],
-   ['San Mateo',37.5630,-122.3255],['Palo Alto',37.4419,-122.1430],['San Jose — Downtown',37.3382,-121.8863],
-   ['Walnut Creek',37.9101,-122.0652],['Daly City',37.6879,-122.4702],['Redwood City',37.4852,-122.2364],
-   ['Mountain View',37.3861,-122.0839]].forEach(([nm,la,ln])=>addJob(la,ln,nm));
-};
+  state.base={...base};
+  for(const [la,ln,nm] of jobs){ state.jobs.push({id:uid++,lat:la,lng:ln,name:nm}); }
+  renderPoints(); drawMarkers(); fitMap();
+}
+$('loadOld').onclick=()=>loadPreset(OLD_BASE, OLD_BRANCH_JOBS);
+$('loadNew').onclick=()=>loadPreset(NEW_BASE, NEW_BRANCH_JOBS);
+$('example').onclick=()=>loadPreset(OLD_BASE, [...OLD_BRANCH_JOBS, ...NEW_BRANCH_JOBS]);
 
 // ---- Connection test ----
 async function testConnection(){
